@@ -1,0 +1,222 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Socket.IO chat</title>
+
+  </head>
+  <body>
+
+    <div id="main">
+      <div id="usernameContainer">
+        <form id="usernameForm" method="POST">
+          <p>Enter Username: </p>
+          <input id="username" /><button>Send</button>
+        </form>
+      </div>
+
+      <div id="chatroomContainer">
+        <ul id="userList">
+        </ul>
+
+        <ul id="messages">
+        </ul> 
+
+        <form id="messageForm" action="">
+          <p>Messages: </p>
+          <input id="m" autocomplete="off" /><button>Send</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- INVITE PANE -->
+    <div id="gameInvite">
+    </div>
+
+    <!-- WAITING PANE -->
+    <div id="waitingPane">
+      <h2>Waiting for player to respond...</h2>
+    </div>
+
+    <!-- PRIVATE ROOM CHAT -->
+    <div id="privatedRoom">
+      <ul id="privatedMessages">
+      </ul> 
+
+      <form id="privateMessageForm" action="">
+        <p>Messages: </p>
+        <input id="privateM" autocomplete="off" /><button>Send</button>
+      </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+
+    <script>
+      $(function() {
+
+        var socket = io();
+        var clientName;
+        var otherClientArr = [];
+        var currentRoom;
+        $('#chatroomContainer').hide();
+        $('#gameInvite').hide(); 
+        $('#waitingPane').hide();
+        $('#privatedRoom').hide();
+
+        // this client enter username
+        $('#usernameForm').submit(function() {
+          clientName = $('#username').val();
+
+          socket.emit('new chatroom');
+          socket.emit('add client', clientName);
+
+          $('#usernameContainer').fadeOut();
+          $('#chatroomContainer').fadeIn();
+
+          return false;
+        });
+
+        // this client wrote a message
+        $('#messageForm').submit(function() {
+          var dataObj = {};
+          dataObj.msg = $('#m').val();
+          dataObj.sender = clientName;
+
+          socket.emit('chat message', dataObj);
+          $('#m').val('');
+          return false;
+        });
+
+        $('#privateMessageForm').submit(function() {
+          var dataObj = {};
+          dataObj.msg = $('#privateM').val();
+          dataObj.sender = clientName;
+          dataObj.roomname = currentRoom;
+
+          socket.emit('private message', dataObj);
+          $('#privateM').val('');
+          return false;
+        })
+
+        // EL: this client joins new chatroom
+        socket.on('new chatroom', function(serverClientArr) {
+          otherClientArr = serverClientArr;
+
+          // iterate through otherClientArr and append them to userList
+          for (var i = 0; i < otherClientArr.length; i++) {
+
+            var userListItem = '<li value=\'' + otherClientArr[i].id + '\'>' + otherClientArr[i].name + '</li>';
+
+            var userButtonStr = '<input type=\"button\" id=\"' + otherClientArr[i].id + '\" value=\"Invite ' + otherClientArr[i]       .name + ' to Game\" />';
+
+            $('#userList').append(userListItem + userButtonStr);
+          }
+
+          // register invite game click event for pre-existing clients
+          $('#userList input[type=button]').click(function() {
+            var clickedId = $(this).attr('id');
+
+            socket.emit('invite game', clickedId);
+
+            $('#main').fadeOut();
+            $('#waitingPane').fadeIn();
+          });
+        })
+
+        // EL: new client joins this client
+        socket.on('add client', function(clientObj) {
+          otherClientArr.push(clientObj);
+
+          var userListItem = '<li value=\'' + clientObj.id + '\'>' + clientObj.name + '</li>';
+
+          // <input type="button" id="abc" value="Invite James to Game" />
+          var userButtonStr = '<input type=\"button\" id=\"' + clientObj.id + '\" value=\"Invite ' + clientObj.name + ' to Game\" />';
+      
+          $('#userList').append(userListItem + userButtonStr);
+
+          $('#' + clientObj.id).click(function() {
+            var clickedId = $(this).attr('id');
+            // console.log(clickedId);
+            socket.emit('invite game', clickedId);
+
+            $('#main').fadeOut();
+            $('#waitingPane').fadeIn();
+          });
+        }) 
+
+        // EL: this client receives a message
+        socket.on('chat message', function(dataObj) {
+          var listItem = '<li>' + dataObj.sender + ': ' + dataObj.msg + '</li>';
+          // $('#messages').append($('<li>').text(msg));
+          $('#messages').append(listItem);
+        })
+
+        // EL: this client was asked to play a game
+        socket.on('receive invite', function(requestorId) {
+          $('#main').fadeOut();
+
+          // get requestorName from otherClientArr
+          var requestorName = '';
+          for (var i = 0; i < otherClientArr.length; i++) {
+            if (otherClientArr[i].id === requestorId) {
+              requestorName = otherClientArr[i].name;
+            }
+          }
+
+          // build up "Do you want to play? Yes or No?" DOM
+          var requestMsg = '<h1>Do you want to play a game with ' + requestorName + '</h1>';
+          var yesBtn = '<input type=\"button\" class=\"' + requestorId +'\" value=\"Yes\" />';
+          var noBtn = '<input type=\"button\" class=\"' + requestorId +'\" value=\"No\" />';
+          $('#gameInvite').append(requestMsg + yesBtn + noBtn);
+          $('#gameInvite').fadeIn();
+
+          // register "yes or no" click event
+          $('.' + requestorId).click(function() {
+            var inviteResObj = {};
+            inviteResObj.answer = $(this).val();
+            inviteResObj.requestorId = requestorId;
+
+            socket.emit('invite response', inviteResObj);
+
+            $('#gameInvite').hide();
+            $('#waitingPane').show();
+          })
+        })
+
+        socket.on('game created', function(roomname) {
+          currentRoom = roomname;
+
+          $('#waitingPane').fadeOut();
+          $('#privatedRoom').fadeIn();
+
+          $('#privatedRoom').append('<h1>Now in room: ' + currentRoom + '</h1>')
+        });
+
+        // socket.on('game rejected', function() {
+        // });
+
+        socket.on('private message', function(dataObj) {
+          var listItem = '<li>' + dataObj.sender + ': ' + dataObj.msg + '</li>';
+          // $('#messages').append($('<li>').text(msg));
+          $('#privatedMessages').append(listItem);
+        })
+
+      });
+    </script>
+
+  </body>
+</html>
+
+
+
+<!-- make it REACT (can have state ) -->
+
+
+
+
+
+
+
+
+
+
